@@ -1,0 +1,336 @@
+#!/usr/bin/env python3
+"""Generate workflow_facturas_telegram.json v3 based on user's live JSON."""
+import json, uuid
+
+def uid():
+    return str(uuid.uuid4())
+
+def c(node):
+    return {"node": node, "type": "main", "index": 0}
+
+# ── Credentials (user's real IDs from their live JSON) ──────────────────────
+TC = {"telegramApi": {"id": "oPZvxgjNr4EN1uIQ", "name": "Telegram account"}}
+MC = {"mySql":       {"id": "byT5ZLxT42mqulKf", "name": "MySQL account"}}
+
+# ── Code snippets ────────────────────────────────────────────────────────────
+NORMALIZAR = r"""const msg = $input.first().json.message;
+if (!msg) return [{ json: { error: 'no_message', chat_id: null } }];
+let fileId, mimeType, fileName;
+if (msg.document) {
+  fileId   = msg.document.file_id;
+  mimeType = msg.document.mime_type || 'application/octet-stream';
+  fileName = msg.document.file_name || 'documento';
+} else if (msg.photo && msg.photo.length) {
+  const photo = msg.photo[msg.photo.length - 1];
+  fileId = photo.file_id; mimeType = 'image/jpeg'; fileName = 'foto.jpg';
+} else { return [{ json: { error: 'no_file', chat_id: msg.chat.id } }]; }
+const ext = (fileName.split('.').pop() || '').toLowerCase();
+if (!['jpg','jpeg','png','pdf'].includes(ext))
+  return [{ json: { error: 'invalid_type', chat_id: msg.chat.id } }];
+const mimeMap = { jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', pdf:'application/pdf' };
+return [{ json: { file_id:fileId, mime_type:mimeMap[ext]||mimeType, file_name:fileName,
+  extension:ext, chat_id:msg.chat.id,
+  usuario_telegram: msg.from?.username || String(msg.from?.id||''),
+  is_pdf: ext==='pdf', is_image:['jpg','jpeg','png'].includes(ext),
+  docs_base_path:'/opt/documentos' }}];"""
+
+GEMINI_PROMPT = (
+    "Eres un asistente contable experto. Analiza este documento contable "
+    "(factura, recibo, comprobante o similar). Si es escaneado, imagen o PDF "
+    "sin texto seleccionable, aplica OCR. Extrae la informacion y responde "
+    "EXCLUSIVAMENTE con un JSON valido sin markdown ni texto adicional, "
+    'con esta estructura exacta:\n{"fecha_documento":"","tipo_documento":"",'
+    '"numero_documento":"","proveedor":"","nit":"","subtotal":0,"iva":0,'
+    '"retenciones":0,"total":0,"metodo_pago":"","banco":"",'
+    '"numero_comprobante":"","concepto":"","observaciones":"","confianza":0}\n'
+    "Usa formato fecha YYYY-MM-DD. Valores numericos como numeros. "
+    "confianza es 0-100 indicando certeza de lectura."
+)
+
+PREPARAR_GEMINI = (
+    "const binaryKey = Object.keys($input.first().binary || {})[0];\n"
+    "if (!binaryKey) throw new Error('Sin binario del archivo');\n"
+    "const buffer = await this.helpers.getBinaryDataBuffer(0, binaryKey);\n"
+    "const base64 = buffer.toString('base64');\n"
+    "const meta   = $('Normalizar Entrada').first().json;\n"
+    "const mime   = meta.mime_type;\n"
+    "const prompt = " + json.dumps(GEMINI_PROMPT) + ";\n"
+    "const apiKey = $('Config Variables').first().json.gemini_api_key;\n"
+    "if (!apiKey) throw new Error('gemini_api_key no configurada en Config Variables');\n"
+    "return [{ json: { ...meta,\n"
+    "  gemini_url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,\n"
+    "  gemini_body: { contents:[{ parts:[\n"
+    "    { text: prompt },\n"
+    "    { inline_data:{ mime_type:mime, data:base64 } }\n"
+    "  ]}], generationConfig:{ responseMimeType:'application/json', temperature:0.1 } }\n"
+    "}, binary: $input.first().binary }];"
+)
+
+PARSEAR_GEMINI = r"""const response = $input.first().json;
+const meta     = $('Normalizar Entrada').first().json;
+let text = '';
+try { text = response.candidates[0].content.parts[0].text; }
+catch(e) { return [{ json: { parse_error:true, chat_id:meta.chat_id } }]; }
+text = text.trim().replace(/^```json\s*/i,'').replace(/```\s*$/i,'');
+let parsed;
+try { parsed = JSON.parse(text); }
+catch(e) { return [{ json: { parse_error:true, chat_id:meta.chat_id } }]; }
+return [{ json: { ...parsed, chat_id:meta.chat_id,
+  usuario_telegram:meta.usuario_telegram, extension:meta.extension,
+  file_name_original:meta.file_name, docs_base_path:meta.docs_base_path }}];"""
+
+CONSTRUIR_RUTA = r"""const doc   = $('Parsear Respuesta Gemini').first().json;
+const now   = new Date();
+const year  = now.getFullYear();
+const month = String(now.getMonth()+1).padStart(2,'0');
+const uid   = `${Date.now()}_${Math.random().toString(36).slice(2,10)}`;
+const base  = doc.docs_base_path || '/opt/documentos';
+const dir   = `${base}/${year}/${month}`;
+const name  = `${uid}.${doc.extension}`;
+const path  = `${dir}/${name}`;
+return [{ json: { ...doc, nombre_archivo:name, ruta_archivo:path, dir_path:dir } }];"""
+
+RESTAURAR = (
+    "const doc    = $('Construir Ruta Archivo').first().json;\n"
+    "const binary = $('Descargar Archivo Binario').first().binary;\n"
+    "return [{ json: doc, binary }];"
+)
+
+# ── Nodes ────────────────────────────────────────────────────────────────────
+nodes = [
+  # 1 Telegram Trigger
+  { "parameters":{"updates":["message"],"additionalFields":{}},
+    "id":"4623afba-cae5-49d3-a079-1e4646b5230a", "name":"Telegram Trigger",
+    "type":"n8n-nodes-base.telegramTrigger","typeVersion":1.1,
+    "position":[-2880,352],
+    "webhookId":"1600b849-5769-4a51-860f-34993aa7a863","credentials":TC },
+
+  # 2 Config Variables
+  { "parameters":{ "assignments":{ "assignments":[
+      {"id":"6bae26f6-03dd-4507-bb64-70c8ca668a3e","name":"docs_base_path","value":"/opt/documentos","type":"string"},
+      {"id":"86d1f110-3b2f-49e8-ac80-6daeb34b659e","name":"telegram_token","value":"PEGA_AQUI_TU_TOKEN_BOT","type":"string"},
+      {"id":"a5c11de2-ba4b-4586-b2bd-0b541e426f2b","name":"gemini_api_key","value":"PEGA_AQUI_TU_GEMINI_KEY","type":"string"}
+    ]}, "includeOtherFields":True, "options":{}},
+    "id":"4dcd2355-3824-4ca1-85fb-13d39dcfb6af","name":"Config Variables",
+    "type":"n8n-nodes-base.set","typeVersion":3.4,"position":[-2640,352] },
+
+  # 3 Normalizar Entrada
+  { "parameters":{"jsCode":NORMALIZAR,"mode":"runOnceForAllItems"},
+    "id":"0e27d3af-c60f-463e-86cf-a2bf881c2d32","name":"Normalizar Entrada",
+    "type":"n8n-nodes-base.code","typeVersion":2,"position":[-2400,352],
+    "onError":"continueErrorOutput" },
+
+  # 4 Tiene Archivo Valido
+  { "parameters":{"conditions":{"options":{"caseSensitive":True,"leftValue":"","typeValidation":"strict"},
+      "conditions":[{"id":"54d92f64-89b7-4eee-9396-3c9ed1337659","leftValue":"={{ $json.error }}",
+        "rightValue":"","operator":{"type":"string","operation":"empty","singleValue":True}}],
+      "combinator":"and"},"options":{}},
+    "id":"a215b88f-6ed2-4cf2-b805-adfeb01d11cd","name":"Tiene Archivo Valido",
+    "type":"n8n-nodes-base.if","typeVersion":2.2,"position":[-2160,352] },
+
+  # 5 Telegram Archivo Invalido
+  { "parameters":{"chatId":"={{ $json.chat_id }}","text":"Formato no soportado. Envie JPG, PNG, JPEG o PDF.","additionalFields":{}},
+    "id":"48b821ae-f88a-4dc9-91f6-d024067a525e","name":"Telegram Archivo Invalido",
+    "type":"n8n-nodes-base.telegram","typeVersion":1.2,"position":[-1920,560],
+    "webhookId":"031dde78-ccf9-4092-9bd3-49549077123a","credentials":TC },
+
+  # 6 Obtener Info Archivo
+  { "parameters":{"url":"=https://api.telegram.org/bot{{ $('Config Variables').item.json.telegram_token }}/getFile",
+      "sendQuery":True,"queryParameters":{"parameters":[
+        {"name":"file_id","value":"={{ $('Normalizar Entrada').item.json.file_id }}"}]},"options":{}},
+    "id":"d261d5a0-e8cc-4fb7-948e-be633239a671","name":"Obtener Info Archivo",
+    "type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[-1920,208],
+    "onError":"continueErrorOutput" },
+
+  # 7 Descargar Archivo Binario
+  { "parameters":{"url":"=https://api.telegram.org/file/bot{{ $('Config Variables').item.json.telegram_token }}/{{ $json.result.file_path }}",
+      "options":{"response":{"response":{"responseFormat":"file"}}}},
+    "id":"67ce64dd-f3a2-4710-a16e-8dc07850e5c8","name":"Descargar Archivo Binario",
+    "type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[-1680,208],
+    "onError":"continueErrorOutput" },
+
+  # 8 Preparar Gemini
+  { "parameters":{"jsCode":PREPARAR_GEMINI,"mode":"runOnceForAllItems"},
+    "id":"8a810d28-83e6-41ea-afee-65effc277a25","name":"Preparar Gemini",
+    "type":"n8n-nodes-base.code","typeVersion":2,"position":[-1440,208],
+    "onError":"continueErrorOutput" },
+
+  # 9 Gemini Vision OCR
+  { "parameters":{"method":"POST","url":"={{ $json.gemini_url }}","sendBody":True,
+      "specifyBody":"json","jsonBody":"={{ JSON.stringify($json.gemini_body) }}",
+      "options":{"timeout":120000}},
+    "id":"a9ab0634-bb98-4005-ad5b-97678275f66e","name":"Gemini Vision OCR",
+    "type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[-1200,208],
+    "onError":"continueErrorOutput" },
+
+  # 10 Parsear Respuesta Gemini
+  { "parameters":{"jsCode":PARSEAR_GEMINI,"mode":"runOnceForAllItems"},
+    "id":"6296fbe3-15a9-493b-8a20-2ec680062c72","name":"Parsear Respuesta Gemini",
+    "type":"n8n-nodes-base.code","typeVersion":2,"position":[-960,208],
+    "onError":"continueErrorOutput" },
+
+  # 11 Documento Valido
+  { "parameters":{"conditions":{"options":{"caseSensitive":True,"leftValue":"","typeValidation":"loose"},
+      "conditions":[
+        {"id":"f8cf5d43-5c60-47de-81d5-b6ba0fc4a108","leftValue":"={{ $json.parse_error }}","rightValue":True,
+          "operator":{"type":"boolean","operation":"notEquals"}},
+        {"id":"d978e900-8f9d-4b60-8a55-1129cde1a60f","leftValue":"={{ $json.fecha_documento }}","rightValue":"",
+          "operator":{"type":"string","operation":"notEmpty","singleValue":True}},
+        {"id":"13017504-0a8e-4f9e-ab9d-5935442a796b","leftValue":"={{ $json.proveedor }}","rightValue":"",
+          "operator":{"type":"string","operation":"notEmpty","singleValue":True}},
+        {"id":"e37491a0-3308-4478-8ac5-971547f7e271","leftValue":"={{ $json.total }}","rightValue":"",
+          "operator":{"type":"number","operation":"exists","singleValue":True}}],
+      "combinator":"and"},"options":{}},
+    "id":"68227242-7c4b-4851-b04a-ac2064d6f544","name":"Documento Valido",
+    "type":"n8n-nodes-base.if","typeVersion":2.2,"position":[-720,208] },
+
+  # 12 Telegram Lectura Fallida
+  { "parameters":{"chatId":"={{ $json.chat_id }}","text":"No fue posible leer correctamente el documento.","additionalFields":{}},
+    "id":"1f41d58c-4b38-455f-a75f-848473ebb842","name":"Telegram Lectura Fallida",
+    "type":"n8n-nodes-base.telegram","typeVersion":1.2,"position":[-480,432],
+    "webhookId":"fbc3fbd6-8c24-4dc6-9be7-9587d429de62","credentials":TC },
+
+  # 13 Verificar Duplicado MySQL
+  { "parameters":{"operation":"executeQuery",
+      "query":"SELECT MAX(id) as id FROM documentos_contables WHERE numero_documento = '{{ $('Parsear Respuesta Gemini').item.json.numero_documento }}' AND proveedor = '{{ $('Parsear Respuesta Gemini').item.json.proveedor }}' AND total = {{ $('Parsear Respuesta Gemini').item.json.total }};",
+      "options":{}},
+    "id":"1cb1e9b0-c2c6-4af2-820d-62b948b32218","name":"Verificar Duplicado MySQL",
+    "type":"n8n-nodes-base.mySql","typeVersion":2.4,"position":[-480,128],
+    "credentials":MC,"onError":"continueErrorOutput" },
+
+  # 14 Es Duplicado
+  { "parameters":{"conditions":{"options":{"caseSensitive":True,"leftValue":"","typeValidation":"strict"},
+      "conditions":[{"id":"466dfa22-46f4-4ec0-8c49-96d56da8be9e","leftValue":"={{ $json.id }}",
+        "rightValue":"","operator":{"type":"number","operation":"exists","singleValue":True}}],
+      "combinator":"and"},"options":{}},
+    "id":"a9fa77c8-170b-4395-8cc6-abae32b7ce1a","name":"Es Duplicado",
+    "type":"n8n-nodes-base.if","typeVersion":2.2,"position":[-240,128] },
+
+  # 15 Telegram Duplicado  ← NUEVO: respuesta para documentos duplicados
+  { "parameters":{"chatId":"={{ $('Parsear Respuesta Gemini').item.json.chat_id }}",
+      "text":"Documento ya registrado.","additionalFields":{}},
+    "id": uid(),"name":"Telegram Duplicado",
+    "type":"n8n-nodes-base.telegram","typeVersion":1.2,"position":[-240,350],
+    "credentials":TC },
+
+  # 16 Construir Ruta Archivo
+  { "parameters":{"jsCode":CONSTRUIR_RUTA,"mode":"runOnceForAllItems"},
+    "id":"17996f8b-fd04-40e4-9394-089928ca09da","name":"Construir Ruta Archivo",
+    "type":"n8n-nodes-base.code","typeVersion":2,"position":[0,0] },
+
+  # 17 Restaurar Datos Documento
+  { "parameters":{"jsCode":RESTAURAR,"mode":"runOnceForAllItems"},
+    "id":"a4cca7f2-d68f-44f4-a890-ee0ce5a2d3af","name":"Restaurar Datos Documento",
+    "type":"n8n-nodes-base.code","typeVersion":2,"position":[240,0] },
+
+  # 18 Crear Directorio  ← NUEVO: mkdir -p antes de escribir el archivo
+  { "parameters":{"command":"=mkdir -p {{ $('Construir Ruta Archivo').item.json.dir_path }} && chmod 777 {{ $('Construir Ruta Archivo').item.json.dir_path }}"},
+    "id": uid(),"name":"Crear Directorio",
+    "type":"n8n-nodes-base.executeCommand","typeVersion":1,"position":[400,0] },
+
+  # 19 Guardar Archivo Original
+  { "parameters":{"operation":"write","fileName":"={{ $json.ruta_archivo }}","options":{}},
+    "id":"4ba7d55e-8177-44c8-b10a-7e8830f9c178","name":"Guardar Archivo Original",
+    "type":"n8n-nodes-base.readWriteFile","typeVersion":1,"position":[580,0],
+    "onError":"continueErrorOutput" },
+
+  # 20 Mapear Insert MySQL
+  { "parameters":{"assignments":{"assignments":[
+      {"id":"a51e282a-a228-4283-8b2c-e236609747f0","name":"fecha_documento","value":"={{ $('Construir Ruta Archivo').item.json.fecha_documento }}","type":"string"},
+      {"id":"89723430-b90d-459c-8235-5ff08f06534b","name":"tipo_documento","value":"={{ $('Construir Ruta Archivo').item.json.tipo_documento }}","type":"string"},
+      {"id":"ec12fd98-2646-4b36-9342-c0e0e2436000","name":"numero_documento","value":"={{ $('Construir Ruta Archivo').item.json.numero_documento }}","type":"string"},
+      {"id":"58800605-3ea9-4c13-96f7-06859682e206","name":"proveedor","value":"={{ $('Construir Ruta Archivo').item.json.proveedor }}","type":"string"},
+      {"id":"ae837028-a1c9-4c81-8a9b-05feb2a0b757","name":"nit","value":"={{ $('Construir Ruta Archivo').item.json.nit }}","type":"string"},
+      {"id":"6367460e-43ae-4481-be09-3bea8d54d4e9","name":"subtotal","value":"={{ Number($('Construir Ruta Archivo').item.json.subtotal)||0 }}","type":"number"},
+      {"id":"87e537c0-07ff-4303-8092-4f659251c29b","name":"iva","value":"={{ Number($('Construir Ruta Archivo').item.json.iva)||0 }}","type":"number"},
+      {"id":"bee72c97-c309-4e7a-a458-8a2056f75e62","name":"retenciones","value":"={{ Number($('Construir Ruta Archivo').item.json.retenciones)||0 }}","type":"number"},
+      {"id":"dc4d30cd-cf42-4397-a374-ba0c79619196","name":"total","value":"={{ Number($('Construir Ruta Archivo').item.json.total)||0 }}","type":"number"},
+      {"id":"710fcdb8-fe6e-4d63-abb5-4b91f4181ca5","name":"metodo_pago","value":"={{ $('Construir Ruta Archivo').item.json.metodo_pago }}","type":"string"},
+      {"id":"d1390011-ed76-4261-a76e-dfd9365df9c1","name":"banco","value":"={{ $('Construir Ruta Archivo').item.json.banco }}","type":"string"},
+      {"id":"82aa747a-03bb-4420-981c-a6270e38406c","name":"numero_comprobante","value":"={{ $('Construir Ruta Archivo').item.json.numero_comprobante }}","type":"string"},
+      {"id":"edd208a8-2c2f-4f95-a94d-c72ffb786e69","name":"concepto","value":"={{ $('Construir Ruta Archivo').item.json.concepto }}","type":"string"},
+      {"id":"ff4d6ee7-8ca7-498a-9d29-9d4a138b4738","name":"observaciones","value":"={{ $('Construir Ruta Archivo').item.json.observaciones }}","type":"string"},
+      {"id":"7da3e750-829f-477e-a3c3-677bfb6a64d1","name":"nombre_archivo","value":"={{ $('Construir Ruta Archivo').item.json.nombre_archivo }}","type":"string"},
+      {"id":"24962ef6-e029-4051-a540-ff38760668e5","name":"ruta_archivo","value":"={{ $('Construir Ruta Archivo').item.json.ruta_archivo }}","type":"string"},
+      {"id":"caa3a6c8-d2c0-42d6-b1ad-251952afe0c0","name":"usuario_telegram","value":"={{ $('Construir Ruta Archivo').item.json.usuario_telegram }}","type":"string"}
+    ]},"options":{}},
+    "id":"cf21b437-89ae-411f-a4a3-8cb15e6baf1d","name":"Mapear Insert MySQL",
+    "type":"n8n-nodes-base.set","typeVersion":3.4,"position":[800,0] },
+
+  # 21 Insertar MySQL
+  { "parameters":{"table":"documentos_contables","options":{}},
+    "id":"54c17b51-8c5f-4e6a-8384-adbd344da9d9","name":"Insertar MySQL",
+    "type":"n8n-nodes-base.mySql","typeVersion":2.4,"position":[1000,0],
+    "credentials":MC,"onError":"continueErrorOutput" },
+
+  # 22 Telegram Confirmacion
+  { "parameters":{"chatId":"={{ $('Parsear Respuesta Gemini').item.json.chat_id }}",
+      "text":"=✅ Documento registrado\n\nProveedor: {{ $('Parsear Respuesta Gemini').item.json.proveedor }}\nFecha: {{ $('Parsear Respuesta Gemini').item.json.fecha_documento }}\nValor: {{ $('Parsear Respuesta Gemini').item.json.total }}",
+      "additionalFields":{}},
+    "id":"d9102bb4-7159-4b7e-bca4-37073e10c878","name":"Telegram Confirmacion",
+    "type":"n8n-nodes-base.telegram","typeVersion":1.2,"position":[1200,0],
+    "webhookId":"ea6e6806-a00e-46dc-8f69-efd412b58d17","credentials":TC },
+
+  # 23 Telegram Error Proceso
+  { "parameters":{"chatId":"={{ $('Normalizar Entrada').item.json.chat_id || $('Telegram Trigger').item.json.message.chat.id }}",
+      "text":"Ocurrio un error procesando el documento. Intente nuevamente.","additionalFields":{}},
+    "id":"217e276d-1fad-4904-a326-ee04cd9d35fa","name":"Telegram Error Proceso",
+    "type":"n8n-nodes-base.telegram","typeVersion":1.2,"position":[-720,608],
+    "webhookId":"97cc62ef-5d83-4b4b-b9df-7e4c46801699","credentials":TC },
+]
+
+# ── Connections ───────────────────────────────────────────────────────────────
+connections = {
+  "Telegram Trigger":         {"main":[[c("Config Variables")]]},
+  "Config Variables":         {"main":[[c("Normalizar Entrada")]]},
+  "Normalizar Entrada":       {"main":[[c("Tiene Archivo Valido")],[c("Telegram Error Proceso")]]},
+  "Tiene Archivo Valido":     {"main":[[c("Obtener Info Archivo")],[c("Telegram Archivo Invalido")]]},
+  "Obtener Info Archivo":     {"main":[[c("Descargar Archivo Binario")],[c("Telegram Error Proceso")]]},
+  "Descargar Archivo Binario":{"main":[[c("Preparar Gemini")],[c("Telegram Error Proceso")]]},
+  "Preparar Gemini":          {"main":[[c("Gemini Vision OCR")],[c("Telegram Error Proceso")]]},
+  "Gemini Vision OCR":        {"main":[[c("Parsear Respuesta Gemini")],[c("Telegram Error Proceso")]]},
+  "Parsear Respuesta Gemini": {"main":[[c("Documento Valido")],[c("Telegram Error Proceso")]]},
+  "Documento Valido":         {"main":[[c("Verificar Duplicado MySQL")],[c("Telegram Lectura Fallida")]]},
+  "Verificar Duplicado MySQL":{"main":[[c("Es Duplicado")],[c("Telegram Error Proceso")]]},
+  "Es Duplicado":             {"main":[[c("Telegram Duplicado")],[c("Construir Ruta Archivo")]]},
+  "Construir Ruta Archivo":   {"main":[[c("Restaurar Datos Documento")]]},
+  "Restaurar Datos Documento":{"main":[[c("Crear Directorio")]]},
+  # Crear Directorio → Guardar (éxito) y también → Guardar (error de mkdir se ignora y sigue)
+  "Crear Directorio":         {"main":[[c("Guardar Archivo Original")]]},
+  # Guardar: éxito → Mapear, error → Mapear (el registro se guarda aunque falle el archivo)
+  "Guardar Archivo Original": {"main":[[c("Mapear Insert MySQL")],[c("Mapear Insert MySQL")]]},
+  "Mapear Insert MySQL":      {"main":[[c("Insertar MySQL")]]},
+  "Insertar MySQL":           {"main":[[c("Telegram Confirmacion")],[c("Telegram Error Proceso")]]},
+}
+
+workflow = {
+  "name": "Asistente Contable - Recepcion Documentos Telegram",
+  "nodes": nodes,
+  "connections": connections,
+  "active": False,
+  "settings": {"executionOrder":"v1","binaryMode":"separate","availableInMCP":False},
+  "versionId": uid(),
+  "meta": {"templateCredsSetupCompleted":True,
+           "instanceId":"58ed0af1d614e6e95b2a22e1e4849975abb4f878214a3bdaa7b347118c285812"},
+  "nodeGroups": [],
+  "tags": []
+}
+
+# ── Validate ──────────────────────────────────────────────────────────────────
+path = "/workspace/n8n-workflows/workflow_facturas_telegram.json"
+with open(path,"w",encoding="utf-8") as f:
+    json.dump(workflow, f, ensure_ascii=False, indent=2)
+
+data = json.load(open(path))
+names = {n['name'] for n in data['nodes']}
+errors = []
+for src, outs in data['connections'].items():
+    if src not in names: errors.append(f"BAD SRC: {src}")
+    for branch in outs.get('main',[]):
+        for conn in branch:
+            if conn['node'] not in names: errors.append(f"BAD TARGET: {src} -> {conn['node']}")
+
+if errors:
+    for e in errors: print("ERROR:", e)
+else:
+    print(f"OK — {len(data['nodes'])} nodos, 0 errores de conexión")

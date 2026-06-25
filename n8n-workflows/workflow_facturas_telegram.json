@@ -5,27 +5,27 @@
       "parameters": {
         "updates": [
           "message"
-        ]
+        ],
+        "additionalFields": {}
       },
-      "id": "8c93db5d-40f2-46ad-96f9-d6bc7c0d9657",
+      "id": "4623afba-cae5-49d3-a079-1e4646b5230a",
       "name": "Telegram Trigger",
       "type": "n8n-nodes-base.telegramTrigger",
       "typeVersion": 1.1,
       "position": [
-        -1200,
-        300
+        -2880,
+        352
       ],
+      "webhookId": "1600b849-5769-4a51-860f-34993aa7a863",
       "credentials": {
         "telegramApi": {
-          "id": "TELEGRAM_CRED_ID",
-          "name": "Telegram Bot Contabilidad"
+          "id": "oPZvxgjNr4EN1uIQ",
+          "name": "Telegram account"
         }
       }
     },
     {
       "parameters": {
-        "mode": "manual",
-        "duplicateItem": false,
         "assignments": {
           "assignments": [
             {
@@ -33,33 +33,45 @@
               "name": "docs_base_path",
               "value": "/opt/documentos",
               "type": "string"
+            },
+            {
+              "id": "86d1f110-3b2f-49e8-ac80-6daeb34b659e",
+              "name": "telegram_token",
+              "value": "PEGA_AQUI_TU_TOKEN_BOT",
+              "type": "string"
+            },
+            {
+              "id": "a5c11de2-ba4b-4586-b2bd-0b541e426f2b",
+              "name": "gemini_api_key",
+              "value": "PEGA_AQUI_TU_GEMINI_KEY",
+              "type": "string"
             }
           ]
         },
         "includeOtherFields": true,
         "options": {}
       },
-      "id": "16ab1b6a-179e-41a3-be02-14b08ea98264",
+      "id": "4dcd2355-3824-4ca1-85fb-13d39dcfb6af",
       "name": "Config Variables",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        -960,
-        300
+        -2640,
+        352
       ]
     },
     {
       "parameters": {
-        "jsCode": "const msg = $input.first().json.message;\nif (!msg) return [{ json: { error: 'no_message', chat_id: null } }];\n\nlet fileId, mimeType, fileName;\nif (msg.document) {\n  fileId   = msg.document.file_id;\n  mimeType = msg.document.mime_type || 'application/octet-stream';\n  fileName = msg.document.file_name || 'documento';\n} else if (msg.photo && msg.photo.length) {\n  const photo = msg.photo[msg.photo.length - 1];\n  fileId   = photo.file_id;\n  mimeType = 'image/jpeg';\n  fileName = 'foto.jpg';\n} else {\n  return [{ json: { error: 'no_file', chat_id: msg.chat.id } }];\n}\n\nconst ext = (fileName.split('.').pop() || '').toLowerCase();\nif (!['jpg','jpeg','png','pdf'].includes(ext))\n  return [{ json: { error: 'invalid_type', chat_id: msg.chat.id } }];\n\nconst mimeMap = { jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', pdf:'application/pdf' };\n\nreturn [{ json: {\n  file_id: fileId,\n  mime_type: mimeMap[ext] || mimeType,\n  file_name: fileName,\n  extension: ext,\n  chat_id: msg.chat.id,\n  usuario_telegram: msg.from?.username || String(msg.from?.id || ''),\n  is_pdf:  ext === 'pdf',\n  is_image: ['jpg','jpeg','png'].includes(ext),\n  docs_base_path: '/opt/documentos',\n}}];",
+        "jsCode": "const msg = $input.first().json.message;\nif (!msg) return [{ json: { error: 'no_message', chat_id: null } }];\nlet fileId, mimeType, fileName;\nif (msg.document) {\n  fileId   = msg.document.file_id;\n  mimeType = msg.document.mime_type || 'application/octet-stream';\n  fileName = msg.document.file_name || 'documento';\n} else if (msg.photo && msg.photo.length) {\n  const photo = msg.photo[msg.photo.length - 1];\n  fileId = photo.file_id; mimeType = 'image/jpeg'; fileName = 'foto.jpg';\n} else { return [{ json: { error: 'no_file', chat_id: msg.chat.id } }]; }\nconst ext = (fileName.split('.').pop() || '').toLowerCase();\nif (!['jpg','jpeg','png','pdf'].includes(ext))\n  return [{ json: { error: 'invalid_type', chat_id: msg.chat.id } }];\nconst mimeMap = { jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', pdf:'application/pdf' };\nreturn [{ json: { file_id:fileId, mime_type:mimeMap[ext]||mimeType, file_name:fileName,\n  extension:ext, chat_id:msg.chat.id,\n  usuario_telegram: msg.from?.username || String(msg.from?.id||''),\n  is_pdf: ext==='pdf', is_image:['jpg','jpeg','png'].includes(ext),\n  docs_base_path:'/opt/documentos' }}];",
         "mode": "runOnceForAllItems"
       },
-      "id": "014854e0-881a-44fc-9166-2864d408d2a9",
+      "id": "0e27d3af-c60f-463e-86cf-a2bf881c2d32",
       "name": "Normalizar Entrada",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -720,
-        300
+        -2400,
+        352
       ],
       "onError": "continueErrorOutput"
     },
@@ -87,42 +99,40 @@
         },
         "options": {}
       },
-      "id": "5cf3dad8-6a15-4686-aebf-3c75be62b090",
+      "id": "a215b88f-6ed2-4cf2-b805-adfeb01d11cd",
       "name": "Tiene Archivo Valido",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        -480,
-        300
+        -2160,
+        352
       ]
     },
     {
       "parameters": {
-        "resource": "message",
-        "operation": "sendMessage",
         "chatId": "={{ $json.chat_id }}",
         "text": "Formato no soportado. Envie JPG, PNG, JPEG o PDF.",
         "additionalFields": {}
       },
-      "id": "f276efe1-ba53-414e-8dbc-60a7442dc418",
+      "id": "48b821ae-f88a-4dc9-91f6-d024067a525e",
       "name": "Telegram Archivo Invalido",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        -240,
-        520
+        -1920,
+        560
       ],
+      "webhookId": "031dde78-ccf9-4092-9bd3-49549077123a",
       "credentials": {
         "telegramApi": {
-          "id": "TELEGRAM_CRED_ID",
-          "name": "Telegram Bot Contabilidad"
+          "id": "oPZvxgjNr4EN1uIQ",
+          "name": "Telegram account"
         }
       }
     },
     {
       "parameters": {
-        "method": "GET",
-        "url": "=https://api.telegram.org/bot{{ $vars.TELEGRAM_TOKEN }}/getFile",
+        "url": "=https://api.telegram.org/bot{{ $('Config Variables').item.json.telegram_token }}/getFile",
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
@@ -134,51 +144,49 @@
         },
         "options": {}
       },
-      "id": "25bd5a80-1751-4ff8-8fc4-72eb7137d8d8",
+      "id": "d261d5a0-e8cc-4fb7-948e-be633239a671",
       "name": "Obtener Info Archivo",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -240,
-        160
+        -1920,
+        208
       ],
       "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "method": "GET",
-        "url": "=https://api.telegram.org/file/bot{{ $vars.TELEGRAM_TOKEN }}/{{ $json.result.file_path }}",
+        "url": "=https://api.telegram.org/file/bot{{ $('Config Variables').item.json.telegram_token }}/{{ $json.result.file_path }}",
         "options": {
           "response": {
             "response": {
-              "responseFormat": "file",
-              "outputPropertyName": "data"
+              "responseFormat": "file"
             }
           }
         }
       },
-      "id": "5db37a34-8b57-4b44-8461-cb7e9a86b166",
+      "id": "67ce64dd-f3a2-4710-a16e-8dc07850e5c8",
       "name": "Descargar Archivo Binario",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        0,
-        160
+        -1680,
+        208
       ],
       "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "jsCode": "const binaryKey = Object.keys($input.first().binary || {})[0];\nif (!binaryKey) throw new Error('Sin binario del archivo');\n\nconst buffer = await this.helpers.getBinaryDataBuffer(0, binaryKey);\nconst base64 = buffer.toString('base64');\nconst meta   = $('Normalizar Entrada').first().json;\nconst mime   = meta.mime_type;\n\nconst prompt = \"Eres un asistente contable experto. Analiza este documento contable (factura, recibo, comprobante o similar). Si es escaneado, imagen o PDF sin texto seleccionable, aplica OCR. Extrae la informacion y responde EXCLUSIVAMENTE con un JSON valido sin markdown ni texto adicional, con esta estructura exacta:\\n{\\\"fecha_documento\\\":\\\"\\\",\\\"tipo_documento\\\":\\\"\\\",\\\"numero_documento\\\":\\\"\\\",\\\"proveedor\\\":\\\"\\\",\\\"nit\\\":\\\"\\\",\\\"subtotal\\\":0,\\\"iva\\\":0,\\\"retenciones\\\":0,\\\"total\\\":0,\\\"metodo_pago\\\":\\\"\\\",\\\"banco\\\":\\\"\\\",\\\"numero_comprobante\\\":\\\"\\\",\\\"concepto\\\":\\\"\\\",\\\"observaciones\\\":\\\"\\\",\\\"confianza\\\":0}\\nUsa formato fecha YYYY-MM-DD. Valores numericos como numeros. confianza es 0-100 indicando certeza de lectura.\";\n\nconst apiKey = $vars.GEMINI_API_KEY;\nif (!apiKey) throw new Error('Variable GEMINI_API_KEY no configurada en n8n');\n\nreturn [{\n  json: {\n    ...meta,\n    gemini_url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,\n    gemini_body: {\n      contents: [{ parts: [\n        { text: prompt },\n        { inline_data: { mime_type: mime, data: base64 } },\n      ]}],\n      generationConfig: { responseMimeType: 'application/json', temperature: 0.1 },\n    },\n  },\n  binary: $input.first().binary,\n}];",
+        "jsCode": "const binaryKey = Object.keys($input.first().binary || {})[0];\nif (!binaryKey) throw new Error('Sin binario del archivo');\nconst buffer = await this.helpers.getBinaryDataBuffer(0, binaryKey);\nconst base64 = buffer.toString('base64');\nconst meta   = $('Normalizar Entrada').first().json;\nconst mime   = meta.mime_type;\nconst prompt = \"Eres un asistente contable experto. Analiza este documento contable (factura, recibo, comprobante o similar). Si es escaneado, imagen o PDF sin texto seleccionable, aplica OCR. Extrae la informacion y responde EXCLUSIVAMENTE con un JSON valido sin markdown ni texto adicional, con esta estructura exacta:\\n{\\\"fecha_documento\\\":\\\"\\\",\\\"tipo_documento\\\":\\\"\\\",\\\"numero_documento\\\":\\\"\\\",\\\"proveedor\\\":\\\"\\\",\\\"nit\\\":\\\"\\\",\\\"subtotal\\\":0,\\\"iva\\\":0,\\\"retenciones\\\":0,\\\"total\\\":0,\\\"metodo_pago\\\":\\\"\\\",\\\"banco\\\":\\\"\\\",\\\"numero_comprobante\\\":\\\"\\\",\\\"concepto\\\":\\\"\\\",\\\"observaciones\\\":\\\"\\\",\\\"confianza\\\":0}\\nUsa formato fecha YYYY-MM-DD. Valores numericos como numeros. confianza es 0-100 indicando certeza de lectura.\";\nconst apiKey = $('Config Variables').first().json.gemini_api_key;\nif (!apiKey) throw new Error('gemini_api_key no configurada en Config Variables');\nreturn [{ json: { ...meta,\n  gemini_url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,\n  gemini_body: { contents:[{ parts:[\n    { text: prompt },\n    { inline_data:{ mime_type:mime, data:base64 } }\n  ]}], generationConfig:{ responseMimeType:'application/json', temperature:0.1 } }\n}, binary: $input.first().binary }];",
         "mode": "runOnceForAllItems"
       },
-      "id": "9bc044d8-6e8a-41a2-a204-056cf34fe68c",
+      "id": "8a810d28-83e6-41ea-afee-65effc277a25",
       "name": "Preparar Gemini",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        240,
-        160
+        -1440,
+        208
       ],
       "onError": "continueErrorOutput"
     },
@@ -193,28 +201,28 @@
           "timeout": 120000
         }
       },
-      "id": "2251fcc0-6f9f-4bee-8b30-5b053ffce0dc",
+      "id": "a9ab0634-bb98-4005-ad5b-97678275f66e",
       "name": "Gemini Vision OCR",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        480,
-        160
+        -1200,
+        208
       ],
       "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "jsCode": "const response = $input.first().json;\nconst meta     = $('Normalizar Entrada').first().json;\n\nlet text = '';\ntry { text = response.candidates[0].content.parts[0].text; }\ncatch(e) { return [{ json: { parse_error: true, chat_id: meta.chat_id } }]; }\n\ntext = text.trim().replace(/^```json\\s*/i,'').replace(/```\\s*$/i,'');\n\nlet parsed;\ntry { parsed = JSON.parse(text); }\ncatch(e) { return [{ json: { parse_error: true, chat_id: meta.chat_id } }]; }\n\nreturn [{ json: {\n  ...parsed,\n  chat_id:          meta.chat_id,\n  usuario_telegram: meta.usuario_telegram,\n  extension:        meta.extension,\n  file_name_original: meta.file_name,\n  docs_base_path:   meta.docs_base_path,\n}}];",
+        "jsCode": "const response = $input.first().json;\nconst meta     = $('Normalizar Entrada').first().json;\nlet text = '';\ntry { text = response.candidates[0].content.parts[0].text; }\ncatch(e) { return [{ json: { parse_error:true, chat_id:meta.chat_id } }]; }\ntext = text.trim().replace(/^```json\\s*/i,'').replace(/```\\s*$/i,'');\nlet parsed;\ntry { parsed = JSON.parse(text); }\ncatch(e) { return [{ json: { parse_error:true, chat_id:meta.chat_id } }]; }\nreturn [{ json: { ...parsed, chat_id:meta.chat_id,\n  usuario_telegram:meta.usuario_telegram, extension:meta.extension,\n  file_name_original:meta.file_name, docs_base_path:meta.docs_base_path }}];",
         "mode": "runOnceForAllItems"
       },
-      "id": "83b0af8f-70a5-4c59-931e-5599dcaaadf9",
+      "id": "6296fbe3-15a9-493b-8a20-2ec680062c72",
       "name": "Parsear Respuesta Gemini",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        720,
-        160
+        -960,
+        208
       ],
       "onError": "continueErrorOutput"
     },
@@ -271,58 +279,55 @@
         },
         "options": {}
       },
-      "id": "b64af143-7582-4b5f-9840-e752f33f643a",
+      "id": "68227242-7c4b-4851-b04a-ac2064d6f544",
       "name": "Documento Valido",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        960,
-        160
+        -720,
+        208
       ]
     },
     {
       "parameters": {
-        "resource": "message",
-        "operation": "sendMessage",
         "chatId": "={{ $json.chat_id }}",
         "text": "No fue posible leer correctamente el documento.",
         "additionalFields": {}
       },
-      "id": "0bb95394-c679-4207-bb6d-58fb64bc63d5",
+      "id": "1f41d58c-4b38-455f-a75f-848473ebb842",
       "name": "Telegram Lectura Fallida",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        1200,
-        380
+        -480,
+        432
       ],
+      "webhookId": "fbc3fbd6-8c24-4dc6-9be7-9587d429de62",
       "credentials": {
         "telegramApi": {
-          "id": "TELEGRAM_CRED_ID",
-          "name": "Telegram Bot Contabilidad"
+          "id": "oPZvxgjNr4EN1uIQ",
+          "name": "Telegram account"
         }
       }
     },
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT id FROM documentos_contables WHERE numero_documento = ? AND proveedor = ? AND total = ? LIMIT 1;",
-        "options": {
-          "queryReplacement": "={{ $('Parsear Respuesta Gemini').item.json.numero_documento }},={{ $('Parsear Respuesta Gemini').item.json.proveedor }},={{ $('Parsear Respuesta Gemini').item.json.total }}"
-        }
+        "query": "SELECT MAX(id) as id FROM documentos_contables WHERE numero_documento = '{{ $('Parsear Respuesta Gemini').item.json.numero_documento }}' AND proveedor = '{{ $('Parsear Respuesta Gemini').item.json.proveedor }}' AND total = {{ $('Parsear Respuesta Gemini').item.json.total }};",
+        "options": {}
       },
-      "id": "61dd9944-91d0-40bc-849b-794d9ce69185",
+      "id": "1cb1e9b0-c2c6-4af2-820d-62b948b32218",
       "name": "Verificar Duplicado MySQL",
       "type": "n8n-nodes-base.mySql",
       "typeVersion": 2.4,
       "position": [
-        1200,
-        80
+        -480,
+        128
       ],
       "credentials": {
         "mySql": {
-          "id": "MYSQL_CRED_ID",
-          "name": "MySQL Contabilidad"
+          "id": "byT5ZLxT42mqulKf",
+          "name": "MySQL account"
         }
       },
       "onError": "continueErrorOutput"
@@ -351,50 +356,48 @@
         },
         "options": {}
       },
-      "id": "97c79209-2a1a-40d3-8f40-4a2153ee715a",
+      "id": "a9fa77c8-170b-4395-8cc6-abae32b7ce1a",
       "name": "Es Duplicado",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        1440,
-        80
+        -240,
+        128
       ]
     },
     {
       "parameters": {
-        "resource": "message",
-        "operation": "sendMessage",
         "chatId": "={{ $('Parsear Respuesta Gemini').item.json.chat_id }}",
         "text": "Documento ya registrado.",
         "additionalFields": {}
       },
-      "id": "09a7b8ad-cc3a-4833-810c-05911a7a7a37",
+      "id": "9afb1777-ed1c-4e6d-9070-155e270e5a5f",
       "name": "Telegram Duplicado",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        1680,
-        280
+        -240,
+        350
       ],
       "credentials": {
         "telegramApi": {
-          "id": "TELEGRAM_CRED_ID",
-          "name": "Telegram Bot Contabilidad"
+          "id": "oPZvxgjNr4EN1uIQ",
+          "name": "Telegram account"
         }
       }
     },
     {
       "parameters": {
-        "jsCode": "const fs  = require('fs');\nconst doc = $('Parsear Respuesta Gemini').first().json;\nconst now = new Date();\nconst year  = now.getFullYear();\nconst month = String(now.getMonth()+1).padStart(2,'0');\nconst uid   = `${Date.now()}_${Math.random().toString(36).slice(2,10)}`;\nconst base  = doc.docs_base_path || '/opt/documentos';\nconst dir   = `${base}/${year}/${month}`;\nconst name  = `${uid}.${doc.extension}`;\nconst path  = `${dir}/${name}`;\nfs.mkdirSync(dir, { recursive: true });\nreturn [{ json: { ...doc, nombre_archivo: name, ruta_archivo: path, dir_path: dir } }];",
+        "jsCode": "const doc   = $('Parsear Respuesta Gemini').first().json;\nconst now   = new Date();\nconst year  = now.getFullYear();\nconst month = String(now.getMonth()+1).padStart(2,'0');\nconst uid   = `${Date.now()}_${Math.random().toString(36).slice(2,10)}`;\nconst base  = doc.docs_base_path || '/opt/documentos';\nconst dir   = `${base}/${year}/${month}`;\nconst name  = `${uid}.${doc.extension}`;\nconst path  = `${dir}/${name}`;\nreturn [{ json: { ...doc, nombre_archivo:name, ruta_archivo:path, dir_path:dir } }];",
         "mode": "runOnceForAllItems"
       },
-      "id": "c50ce8b2-4d5b-4e9d-9eb0-a3f896bfcc6b",
+      "id": "17996f8b-fd04-40e4-9394-089928ca09da",
       "name": "Construir Ruta Archivo",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1680,
-        -40
+        0,
+        0
       ]
     },
     {
@@ -402,36 +405,46 @@
         "jsCode": "const doc    = $('Construir Ruta Archivo').first().json;\nconst binary = $('Descargar Archivo Binario').first().binary;\nreturn [{ json: doc, binary }];",
         "mode": "runOnceForAllItems"
       },
-      "id": "82db3050-f2a1-45de-9d1a-db99988cd265",
+      "id": "a4cca7f2-d68f-44f4-a890-ee0ce5a2d3af",
       "name": "Restaurar Datos Documento",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1920,
-        -40
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "command": "=mkdir -p {{ $('Construir Ruta Archivo').item.json.dir_path }} && chmod 777 {{ $('Construir Ruta Archivo').item.json.dir_path }}"
+      },
+      "id": "db1f625b-d16b-4b86-bcd8-e57c0b0b6c06",
+      "name": "Crear Directorio",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        400,
+        0
       ]
     },
     {
       "parameters": {
         "operation": "write",
         "fileName": "={{ $json.ruta_archivo }}",
-        "dataPropertyName": "data",
         "options": {}
       },
-      "id": "669a8b7f-cda8-4587-a898-6a2c6c04de32",
+      "id": "4ba7d55e-8177-44c8-b10a-7e8830f9c178",
       "name": "Guardar Archivo Original",
       "type": "n8n-nodes-base.readWriteFile",
       "typeVersion": 1,
       "position": [
-        2160,
-        -40
+        580,
+        0
       ],
       "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "mode": "manual",
-        "duplicateItem": false,
         "assignments": {
           "assignments": [
             {
@@ -540,81 +553,77 @@
         },
         "options": {}
       },
-      "id": "0b2f757d-31a5-4104-82c4-5a6b38bfb4bf",
+      "id": "cf21b437-89ae-411f-a4a3-8cb15e6baf1d",
       "name": "Mapear Insert MySQL",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        2400,
-        -40
+        800,
+        0
       ]
     },
     {
       "parameters": {
-        "operation": "insert",
         "table": "documentos_contables",
-        "columns": "fecha_documento,tipo_documento,numero_documento,proveedor,nit,subtotal,iva,retenciones,total,metodo_pago,banco,numero_comprobante,concepto,observaciones,nombre_archivo,ruta_archivo,usuario_telegram",
         "options": {}
       },
-      "id": "1b9763c3-96f7-43f7-b50b-deadc109d5bf",
+      "id": "54c17b51-8c5f-4e6a-8384-adbd344da9d9",
       "name": "Insertar MySQL",
       "type": "n8n-nodes-base.mySql",
       "typeVersion": 2.4,
       "position": [
-        2640,
-        -40
+        1000,
+        0
       ],
       "credentials": {
         "mySql": {
-          "id": "MYSQL_CRED_ID",
-          "name": "MySQL Contabilidad"
+          "id": "byT5ZLxT42mqulKf",
+          "name": "MySQL account"
         }
       },
       "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "resource": "message",
-        "operation": "sendMessage",
         "chatId": "={{ $('Parsear Respuesta Gemini').item.json.chat_id }}",
         "text": "=✅ Documento registrado\n\nProveedor: {{ $('Parsear Respuesta Gemini').item.json.proveedor }}\nFecha: {{ $('Parsear Respuesta Gemini').item.json.fecha_documento }}\nValor: {{ $('Parsear Respuesta Gemini').item.json.total }}",
         "additionalFields": {}
       },
-      "id": "d2b7e490-3733-41ce-8616-d36359068c92",
+      "id": "d9102bb4-7159-4b7e-bca4-37073e10c878",
       "name": "Telegram Confirmacion",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        2880,
-        -40
+        1200,
+        0
       ],
+      "webhookId": "ea6e6806-a00e-46dc-8f69-efd412b58d17",
       "credentials": {
         "telegramApi": {
-          "id": "TELEGRAM_CRED_ID",
-          "name": "Telegram Bot Contabilidad"
+          "id": "oPZvxgjNr4EN1uIQ",
+          "name": "Telegram account"
         }
       }
     },
     {
       "parameters": {
-        "resource": "message",
-        "operation": "sendMessage",
         "chatId": "={{ $('Normalizar Entrada').item.json.chat_id || $('Telegram Trigger').item.json.message.chat.id }}",
         "text": "Ocurrio un error procesando el documento. Intente nuevamente.",
         "additionalFields": {}
       },
-      "id": "aa43316e-ae86-47ec-964a-ca46eaa009a8",
+      "id": "217e276d-1fad-4904-a326-ee04cd9d35fa",
       "name": "Telegram Error Proceso",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        960,
-        560
+        -720,
+        608
       ],
+      "webhookId": "97cc62ef-5d83-4b4b-b9df-7e4c46801699",
       "credentials": {
         "telegramApi": {
-          "id": "TELEGRAM_CRED_ID",
-          "name": "Telegram Bot Contabilidad"
+          "id": "oPZvxgjNr4EN1uIQ",
+          "name": "Telegram account"
         }
       }
     }
@@ -837,6 +846,17 @@
       "main": [
         [
           {
+            "node": "Crear Directorio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crear Directorio": {
+      "main": [
+        [
+          {
             "node": "Guardar Archivo Original",
             "type": "main",
             "index": 0
@@ -855,7 +875,7 @@
         ],
         [
           {
-            "node": "Telegram Error Proceso",
+            "node": "Mapear Insert MySQL",
             "type": "main",
             "index": 0
           }
@@ -895,12 +915,14 @@
   "active": false,
   "settings": {
     "executionOrder": "v1",
-    "timezone": "America/Bogota"
+    "binaryMode": "separate",
+    "availableInMCP": false
   },
-  "versionId": "4b91ac83-1f52-4e7b-b12c-937d112678b2",
+  "versionId": "6c48bb1f-44c0-40c9-8c00-9b46d40ffe14",
   "meta": {
-    "templateCredsSetupCompleted": false,
-    "instanceId": "a215e645-e667-4042-b97a-4d4bd2f10389"
+    "templateCredsSetupCompleted": true,
+    "instanceId": "58ed0af1d614e6e95b2a22e1e4849975abb4f878214a3bdaa7b347118c285812"
   },
+  "nodeGroups": [],
   "tags": []
 }
