@@ -1,0 +1,418 @@
+{
+  "name": "Asistente Contable - Reporte Mensual Gastos",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 1 * *"
+            }
+          ]
+        }
+      },
+      "id": "e4e49e02-5ec8-4c5c-8529-8ac3c964c37b",
+      "name": "Cron Mensual",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -800,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const now = new Date();\nconst firstDayThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);\nconst lastDayPrevMonth = new Date(firstDayThisMonth.getTime() - 86400000);\nconst firstDayPrevMonth = new Date(lastDayPrevMonth.getFullYear(), lastDayPrevMonth.getMonth(), 1);\n\nconst fmt = (d) => d.toISOString().slice(0, 10);\nconst ym = `${lastDayPrevMonth.getFullYear()}_${String(lastDayPrevMonth.getMonth() + 1).padStart(2, '0')}`;\n\nreturn [{\n  json: {\n    fecha_inicio: fmt(firstDayPrevMonth),\n    fecha_fin: fmt(lastDayPrevMonth),\n    periodo: ym,\n    file_name: `Gastos_${ym}.xlsx`,\n    report_email: $env.REPORT_EMAIL || 'correo@empresa.com',\n    smtp_from: $env.SMTP_FROM || 'contabilidad@empresa.com',\n  },\n}];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "3e93f9aa-e6f1-4c00-9965-0b085e9cc5b3",
+      "name": "Calcular Periodo Anterior",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -560,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT fecha_documento, tipo_documento, numero_documento, proveedor, nit, concepto, subtotal, iva, retenciones, total, metodo_pago, banco FROM documentos_contables WHERE fecha_documento >= ? AND fecha_documento <= ? ORDER BY fecha_documento ASC;",
+        "options": {
+          "queryReplacement": "={{ $('Calcular Periodo Anterior').item.json.fecha_inicio }},={{ $('Calcular Periodo Anterior').item.json.fecha_fin }}"
+        }
+      },
+      "id": "5e7980f1-e33c-4a28-ae1b-8df30a29c01c",
+      "name": "Consultar Documentos Mes Anterior",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        -320,
+        300
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "MYSQL_CRED_ID",
+          "name": "MySQL Contabilidad"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "95f42529-5585-4849-aa6f-a574e7c8547d",
+              "leftValue": "={{ $input.all().length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "eb60ddfa-aea4-40cd-869e-22ba7eda520a",
+      "name": "Hay Documentos",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -80,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "includeOtherFields": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "9819f1fe-73f3-40c4-830b-ec6ae22e8741",
+              "name": "Fecha",
+              "value": "={{ $json.fecha_documento }}",
+              "type": "string"
+            },
+            {
+              "id": "05595dfc-baeb-45b0-b4fd-6dd33b29d5ab",
+              "name": "Tipo Documento",
+              "value": "={{ $json.tipo_documento }}",
+              "type": "string"
+            },
+            {
+              "id": "eb733e24-1e1c-460a-a0bb-f228902f4b64",
+              "name": "Numero Documento",
+              "value": "={{ $json.numero_documento }}",
+              "type": "string"
+            },
+            {
+              "id": "c67b4819-1f15-457c-8614-6f5402fcb7df",
+              "name": "Proveedor",
+              "value": "={{ $json.proveedor }}",
+              "type": "string"
+            },
+            {
+              "id": "77823aba-f42d-4825-81c0-72b6be388b1a",
+              "name": "NIT",
+              "value": "={{ $json.nit }}",
+              "type": "string"
+            },
+            {
+              "id": "399b17d7-bf3b-48ba-abe3-7794bc9dc45b",
+              "name": "Concepto",
+              "value": "={{ $json.concepto }}",
+              "type": "string"
+            },
+            {
+              "id": "1e8c5175-3247-4510-8b6c-a0e9f2d53cc4",
+              "name": "Subtotal",
+              "value": "={{ Number($json.subtotal) || 0 }}",
+              "type": "number"
+            },
+            {
+              "id": "1678b5de-153f-416e-9d4b-a9896774fbe7",
+              "name": "IVA",
+              "value": "={{ Number($json.iva) || 0 }}",
+              "type": "number"
+            },
+            {
+              "id": "bebf4b96-c84b-4d0c-8f54-16bde34c10a1",
+              "name": "Retenciones",
+              "value": "={{ Number($json.retenciones) || 0 }}",
+              "type": "number"
+            },
+            {
+              "id": "d407cd97-1cce-4c15-980e-2de84f217bd3",
+              "name": "Total",
+              "value": "={{ Number($json.total) || 0 }}",
+              "type": "number"
+            },
+            {
+              "id": "c547ec8f-4ee4-4f9a-9875-d6e52968af62",
+              "name": "Metodo Pago",
+              "value": "={{ $json.metodo_pago }}",
+              "type": "string"
+            },
+            {
+              "id": "f7cde769-99ee-4208-816d-b4b7e3120b47",
+              "name": "Banco",
+              "value": "={{ $json.banco }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "dc986726-d94b-42e7-b207-82674c6f9e21",
+      "name": "Preparar Consolidado Spreadsheet",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        160,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "toFile",
+        "fileFormat": "xlsx",
+        "options": {
+          "fileName": "={{ $('Calcular Periodo Anterior').item.json.file_name }}",
+          "sheetName": "Consolidado"
+        }
+      },
+      "id": "c87467be-bdb3-478f-b52b-c286b00e0619",
+      "name": "Spreadsheet Consolidado",
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 2,
+      "position": [
+        400,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const XLSX = require('xlsx');\nconst periodo = $('Calcular Periodo Anterior').first().json;\nconst docs = $('Consultar Documentos Mes Anterior').all().map(i => i.json);\n\nlet totalGastos = 0;\nlet totalIva = 0;\nconst porProveedor = {};\nconst porTipo = {};\n\nfor (const d of docs) {\n  const total = Number(d.total) || 0;\n  const iva = Number(d.iva) || 0;\n  totalGastos += total;\n  totalIva += iva;\n  const prov = d.proveedor || 'Sin proveedor';\n  const tipo = d.tipo_documento || 'Sin tipo';\n  porProveedor[prov] = (porProveedor[prov] || 0) + total;\n  porTipo[tipo] = (porTipo[tipo] || 0) + total;\n}\n\nconst resumenRows = [\n  ['Metrica', 'Valor'],\n  ['Total Gastos', totalGastos],\n  ['Total IVA', totalIva],\n  ['', ''],\n  ['Total por proveedor', ''],\n];\n\nfor (const [k, v] of Object.entries(porProveedor).sort((a, b) => b[1] - a[1])) {\n  resumenRows.push([k, v]);\n}\n\nresumenRows.push(['', '']);\nresumenRows.push(['Total por tipo documento', '']);\n\nfor (const [k, v] of Object.entries(porTipo).sort((a, b) => b[1] - a[1])) {\n  resumenRows.push([k, v]);\n}\n\nconst item = $input.first();\nconst binaryKey = Object.keys(item.binary || {})[0];\nif (!binaryKey) {\n  throw new Error('No se genero el archivo consolidado');\n}\n\nconst bufferIn = await this.helpers.getBinaryDataBuffer(0, binaryKey);\nconst wb = XLSX.read(bufferIn, { type: 'buffer' });\nconst ws2 = XLSX.utils.aoa_to_sheet(resumenRows);\nXLSX.utils.book_append_sheet(wb, ws2, 'Resumen');\nconst bufferOut = XLSX.write(wb, { bookType: 'xlsx', type: 'buffer' });\n\nreturn [{\n  json: {\n    file_name: periodo.file_name,\n    report_email: periodo.report_email,\n    smtp_from: periodo.smtp_from,\n    periodo: periodo.periodo,\n    total_registros: docs.length,\n  },\n  binary: {\n    data: {\n      data: bufferOut.toString('base64'),\n      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',\n      fileName: periodo.file_name,\n      fileExtension: 'xlsx',\n    },\n  },\n}];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "2cd9e0ba-e393-4306-8bc1-49b353b019db",
+      "name": "Agregar Hoja Resumen Excel",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        180
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $json.smtp_from }}",
+        "toEmail": "={{ $json.report_email }}",
+        "subject": "Reporte Gastos Mes Anterior",
+        "emailFormat": "text",
+        "text": "=Adjunto reporte de gastos del periodo {{ $json.periodo }}.\nTotal registros: {{ $json.total_registros }}",
+        "options": {
+          "attachments": "data"
+        }
+      },
+      "id": "a4501aa2-31bb-4865-9928-b247d7e46ca3",
+      "name": "Enviar Reporte SMTP",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        880,
+        180
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "SMTP_CRED_ID",
+          "name": "SMTP Empresa"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $('Calcular Periodo Anterior').item.json.smtp_from }}",
+        "toEmail": "={{ $('Calcular Periodo Anterior').item.json.report_email }}",
+        "subject": "Reporte Gastos Mes Anterior",
+        "emailFormat": "text",
+        "text": "=No se encontraron documentos contables para el periodo {{ $('Calcular Periodo Anterior').item.json.periodo }}.",
+        "options": {}
+      },
+      "id": "35a12d06-560a-482f-b450-8fc28e4fd09e",
+      "name": "Sin Documentos Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        160,
+        460
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "SMTP_CRED_ID",
+          "name": "SMTP Empresa"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $('Calcular Periodo Anterior').item.json.smtp_from }}",
+        "toEmail": "={{ $('Calcular Periodo Anterior').item.json.report_email }}",
+        "subject": "Error - Reporte Gastos Mes Anterior",
+        "emailFormat": "text",
+        "text": "Ocurrio un error generando el reporte mensual de gastos. Revise los logs de n8n.",
+        "options": {}
+      },
+      "id": "ce513940-fa2e-4e6a-b14d-5cce477eeea9",
+      "name": "Error Reporte SMTP",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        880,
+        420
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "SMTP_CRED_ID",
+          "name": "SMTP Empresa"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cron Mensual": {
+      "main": [
+        [
+          {
+            "node": "Calcular Periodo Anterior",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular Periodo Anterior": {
+      "main": [
+        [
+          {
+            "node": "Consultar Documentos Mes Anterior",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultar Documentos Mes Anterior": {
+      "main": [
+        [
+          {
+            "node": "Hay Documentos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Reporte SMTP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hay Documentos": {
+      "main": [
+        [
+          {
+            "node": "Preparar Consolidado Spreadsheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sin Documentos Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Consolidado Spreadsheet": {
+      "main": [
+        [
+          {
+            "node": "Spreadsheet Consolidado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Spreadsheet Consolidado": {
+      "main": [
+        [
+          {
+            "node": "Agregar Hoja Resumen Excel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agregar Hoja Resumen Excel": {
+      "main": [
+        [
+          {
+            "node": "Enviar Reporte SMTP",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Reporte SMTP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Reporte SMTP": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Error Reporte SMTP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Bogota"
+  },
+  "versionId": "e77fa8bd-769d-46d6-8439-8fe8b4acec51",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "9cbf2f26-62ba-4139-9feb-5f5cb326762c"
+  },
+  "tags": []
+}
