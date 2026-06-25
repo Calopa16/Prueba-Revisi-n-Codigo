@@ -23,7 +23,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const now = new Date();\nconst firstDayThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);\nconst lastDayPrevMonth = new Date(firstDayThisMonth.getTime() - 86400000);\nconst firstDayPrevMonth = new Date(lastDayPrevMonth.getFullYear(), lastDayPrevMonth.getMonth(), 1);\n\nconst fmt = (d) => d.toISOString().slice(0, 10);\nconst ym = `${lastDayPrevMonth.getFullYear()}_${String(lastDayPrevMonth.getMonth() + 1).padStart(2, '0')}`;\n\nreturn [{\n  json: {\n    fecha_inicio: fmt(firstDayPrevMonth),\n    fecha_fin: fmt(lastDayPrevMonth),\n    periodo: ym,\n    file_name: `Gastos_${ym}.xlsx`,\n    report_email: $env.REPORT_EMAIL || 'correo@empresa.com',\n    smtp_from: $env.SMTP_FROM || 'contabilidad@empresa.com',\n  },\n}];",
+        "jsCode": "const now = new Date();\nconst firstDayThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);\nconst lastDayPrevMonth = new Date(firstDayThisMonth.getTime() - 86400000);\nconst firstDayPrevMonth = new Date(lastDayPrevMonth.getFullYear(), lastDayPrevMonth.getMonth(), 1);\n\nconst fmt = (d) => d.toISOString().slice(0, 10);\nconst ym = `${lastDayPrevMonth.getFullYear()}_${String(lastDayPrevMonth.getMonth() + 1).padStart(2, '0')}`;\n\nreturn [{\n  json: {\n    fecha_inicio: fmt(firstDayPrevMonth),\n    fecha_fin: fmt(lastDayPrevMonth),\n    periodo: ym,\n    file_name: `Gastos_${ym}.xlsx`,\n    report_email: $vars.REPORT_EMAIL || 'correo@empresa.com',\n    smtp_from: $vars.SMTP_FROM || 'contabilidad@empresa.com',\n  },\n}];",
         "mode": "runOnceForAllItems"
       },
       "id": "3e93f9aa-e6f1-4c00-9965-0b085e9cc5b3",
