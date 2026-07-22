@@ -14,35 +14,51 @@ GO
 
   Parámetros
   ----------
-  @IncluirSQLLogins     BIT         = 1
+  @IncluirSQLLogins     BIT              = 1
       Incluye logins de tipo SQL Server (tipo 'S').
 
-  @IncluirWindowsLogins BIT         = 1
+  @IncluirWindowsLogins BIT              = 1
       Incluye logins de Windows: usuario ('U') y grupo ('G').
 
-  @SoloBaseDatos        sysname     = NULL
+  @SoloBaseDatos        sysname          = NULL
       Restringe la sección 4 a una base de datos concreta.
       NULL = todas las BBDDs de usuario que estén ONLINE y no sean read-only.
 
-  @FormatoSalida        VARCHAR(10) = 'FILAS'
-      'FILAS' → devuelve una fila por línea (útil para SSMS con Results to Grid).
-      'TEXTO' → devuelve el script completo en un único NVARCHAR(MAX)
-                (útil para capturar la salida por código o en SSMS con Results to Text).
+  @RutaArchivo          NVARCHAR(500)    = NULL
+      Ruta completa en el servidor donde se guardará el script como archivo .sql.
+      Ejemplo: N'C:\Backup\script_usuarios.sql'
+      NULL = no generar archivo (salida sólo por filas).
+
+      Requisitos para guardar en archivo
+      -----------------------------------
+      · La ruta debe ser accesible desde la cuenta de servicio de SQL Server.
+      · Ole Automation Procedures debe estar habilitado:
+            sp_configure 'Ole Automation Procedures', 1;
+            RECONFIGURE;
+      · Si la extensión .sql no está incluida en @RutaArchivo se agrega
+        automáticamente.
+      · El archivo usa codificación UTF-16 LE (Unicode), legible en SSMS y
+        en cualquier editor moderno.
+
+  Salida
+  ------
+  Siempre devuelve el script línea a línea (una fila = una línea).
+  Si se especifica @RutaArchivo, además guarda el mismo contenido en disco.
 
   Comportamiento
   --------------
   - IDEMPOTENTE: el script generado puede ejecutarse varias veces sin error.
-  - Logins SQL: se scriptan con PASSWORD HASHED y SID original para que los
-    usuarios de base de datos restaurados desde backup queden correctamente
-    vinculados sin necesidad de sp_change_users_login.
+  - Logins SQL: PASSWORD HASHED + SID original para que los usuarios de BD
+    restaurados desde backup queden vinculados sin sp_change_users_login.
   - Logins deshabilitados: se reconstruyen deshabilitados en destino.
+  - ALTER USER WITH LOGIN reemplaza a sp_change_users_login (deprecado).
   - Usuarios huérfanos (SID sin login en el servidor):
-      * Si existe un login con el MISMO NOMBRE, se emite ALTER USER WITH LOGIN
-        para reconectar el usuario (reparación de SID mismatch post-restore).
-      * Si no hay login con ese nombre, se emite un comentario de advertencia.
+      * Si existe un login con el MISMO NOMBRE → ALTER USER WITH LOGIN
+        para reparar el SID mismatch post-restore.
+      * Sin login relacionado → comentario de advertencia para el DBA.
   - Permisos REVOKE implícitos (state = 'R') no se scriptan.
-  - Filtros consistentes: ##%, NT SERVICE\, NT AUTHORITY\, sa excluidos en
-    todas las secciones.
+  - Filtros con COLLATE DATABASE_DEFAULT para evitar conflictos de collation
+    entre la BD de usuario y los catálogos de master.
 
   Compatibilidad
   --------------
@@ -50,19 +66,13 @@ GO
 =============================================================================
 */
 CREATE PROCEDURE dbo.sp_GenerarScriptUsuarios
-    @IncluirSQLLogins     BIT         = 1,
-    @IncluirWindowsLogins BIT         = 1,
-    @SoloBaseDatos        sysname     = NULL,
-    @FormatoSalida        VARCHAR(10) = 'FILAS'   -- 'FILAS' | 'TEXTO'
+    @IncluirSQLLogins     BIT           = 1,
+    @IncluirWindowsLogins BIT           = 1,
+    @SoloBaseDatos        sysname       = NULL,
+    @RutaArchivo          NVARCHAR(500) = NULL   -- ruta en el servidor, ej. N'C:\Sync\usuarios.sql'
 AS
 BEGIN
     SET NOCOUNT ON;
-
-    IF @FormatoSalida NOT IN ('FILAS', 'TEXTO')
-    BEGIN
-        RAISERROR(N'@FormatoSalida debe ser ''FILAS'' o ''TEXTO''.', 16, 1);
-        RETURN;
-    END;
 
     IF OBJECT_ID('tempdb..#ScriptOutput') IS NOT NULL
         DROP TABLE #ScriptOutput;
@@ -513,42 +523,114 @@ BEGIN
     DEALLOCATE db_cursor;
 
     /* ====================================================================
-       5. DEVOLUCIÓN DEL SCRIPT
-          'FILAS' → una fila por línea (Results to Grid en SSMS).
-          'TEXTO' → script completo en un único NVARCHAR(MAX).
-                    Se usa un cursor para garantizar el orden en todas las
-                    versiones de SQL Server (2012-2022), sin depender de
-                    STRING_AGG (disponible solo desde 2017) ni del
-                    comportamiento no garantizado de SELECT @var += col.
+       5. GUARDAR EN ARCHIVO .SQL (opcional)
+          Se usa Scripting.FileSystemObject (OLE Automation) para escribir
+          el script línea a línea en el servidor, evitando el truncado que
+          produce la salida TEXTO en SSMS.
+
+          Requisito: Ole Automation Procedures habilitado en la instancia.
+              sp_configure 'Ole Automation Procedures', 1; RECONFIGURE;
+
+          La cuenta de servicio de SQL Server debe tener acceso de escritura
+          sobre la carpeta de destino.
        ==================================================================== */
-    IF @FormatoSalida = 'TEXTO'
+    IF @RutaArchivo IS NOT NULL
     BEGIN
-        DECLARE @Script  NVARCHAR(MAX) = N'';
-        DECLARE @LineTmp NVARCHAR(MAX);
+        -- Normalizar ruta: sin espacios finales y con extensión .sql
+        SET @RutaArchivo = RTRIM(@RutaArchivo);
+        IF RIGHT(@RutaArchivo, 4) <> N'.sql'
+            SET @RutaArchivo = @RutaArchivo + N'.sql';
 
-        DECLARE out_cursor CURSOR LOCAL FORWARD_ONLY READ_ONLY FOR
-            SELECT ISNULL(Line, N'') FROM #ScriptOutput ORDER BY Id;
-
-        OPEN out_cursor;
-        FETCH NEXT FROM out_cursor INTO @LineTmp;
-        WHILE @@FETCH_STATUS = 0
+        IF (SELECT ISNULL(CAST(value_in_use AS BIT), 0)
+            FROM sys.configurations
+            WHERE name = N'Ole Automation Procedures') = 0
         BEGIN
-            SET @Script = @Script + @LineTmp + CHAR(13)+CHAR(10);
-            FETCH NEXT FROM out_cursor INTO @LineTmp;
+            PRINT N'';
+            PRINT N'AVISO: Ole Automation Procedures no está habilitado.';
+            PRINT N'       Habilítelo con:';
+            PRINT N'           sp_configure ''Ole Automation Procedures'', 1;';
+            PRINT N'           RECONFIGURE;';
+            PRINT N'       El archivo NO se ha guardado.';
         END
-        CLOSE out_cursor;
-        DEALLOCATE out_cursor;
+        ELSE
+        BEGIN
+            DECLARE @OLE      INT;
+            DECLARE @FileID   INT;
+            DECLARE @HResult  INT;
+            DECLARE @ErrSrc2  NVARCHAR(255);
+            DECLARE @ErrDesc2 NVARCHAR(255);
 
-        SELECT @Script AS Script;
+            -- Crear instancia de FileSystemObject
+            EXEC @HResult = sp_OACreate 'Scripting.FileSystemObject', @OLE OUT;
+
+            IF @HResult <> 0
+            BEGIN
+                EXEC sp_OAGetErrorInfo @OLE, @ErrSrc2 OUT, @ErrDesc2 OUT;
+                PRINT N'AVISO: Error al crear FileSystemObject – '
+                      + ISNULL(@ErrDesc2, N'desconocido') + N'.';
+                PRINT N'       El archivo NO se ha guardado.';
+            END
+            ELSE
+            BEGIN
+                -- CreateTextFile(filename, overwrite=True, unicode=True → UTF-16 LE)
+                EXEC @HResult = sp_OAMethod @OLE, 'CreateTextFile',
+                                            @FileID OUT,
+                                            @RutaArchivo,
+                                            1,      -- OverwriteFiles = True
+                                            1;      -- Unicode = True (UTF-16 LE)
+
+                IF @HResult <> 0
+                BEGIN
+                    EXEC sp_OAGetErrorInfo @OLE, @ErrSrc2 OUT, @ErrDesc2 OUT;
+                    PRINT N'AVISO: Error al crear el archivo "'
+                          + @RutaArchivo + N'" – '
+                          + ISNULL(@ErrDesc2, N'desconocido') + N'.';
+                    PRINT N'       Verifique que la ruta exista y que la cuenta';
+                    PRINT N'       de servicio de SQL Server tenga permisos de escritura.';
+                    EXEC sp_OADestroy @OLE;
+                END
+                ELSE
+                BEGIN
+                    -- Escribir el script línea a línea (sin límite de longitud)
+                    DECLARE @FileLine NVARCHAR(MAX);
+
+                    DECLARE file_cursor CURSOR LOCAL FORWARD_ONLY READ_ONLY FOR
+                        SELECT ISNULL(Line, N'') FROM #ScriptOutput ORDER BY Id;
+
+                    OPEN file_cursor;
+                    FETCH NEXT FROM file_cursor INTO @FileLine;
+                    WHILE @@FETCH_STATUS = 0
+                    BEGIN
+                        EXEC sp_OAMethod @FileID, 'WriteLine', NULL, @FileLine;
+                        FETCH NEXT FROM file_cursor INTO @FileLine;
+                    END
+                    CLOSE file_cursor;
+                    DEALLOCATE file_cursor;
+
+                    EXEC sp_OAMethod @FileID, 'Close',  NULL;
+                    EXEC sp_OADestroy @FileID;
+                    EXEC sp_OADestroy @OLE;
+
+                    PRINT N'';
+                    PRINT N'Archivo guardado correctamente en: ' + @RutaArchivo;
+                END
+            END
+        END
     END
-    ELSE
-        SELECT Line FROM #ScriptOutput ORDER BY Id;
+
+    /* ====================================================================
+       6. DEVOLUCIÓN POR FILAS
+          Siempre activa, independientemente de si se guardó archivo.
+          En SSMS: Results to Grid (Ctrl+D) para navegación cómoda.
+                   Results to Text (Ctrl+T) para copiar/pegar el bloque.
+       ==================================================================== */
+    SELECT Line FROM #ScriptOutput ORDER BY Id;
 
     END TRY
     BEGIN CATCH
-        /* Limpiar todos los cursores abiertos antes de propagar el error */
-        IF CURSOR_STATUS('local', 'db_cursor')  >= 0 BEGIN CLOSE db_cursor;  DEALLOCATE db_cursor;  END;
-        IF CURSOR_STATUS('local', 'out_cursor') >= 0 BEGIN CLOSE out_cursor; DEALLOCATE out_cursor; END;
+        /* Limpiar todos los recursos antes de propagar el error */
+        IF CURSOR_STATUS('local', 'db_cursor')   >= 0 BEGIN CLOSE db_cursor;   DEALLOCATE db_cursor;   END;
+        IF CURSOR_STATUS('local', 'file_cursor') >= 0 BEGIN CLOSE file_cursor; DEALLOCATE file_cursor; END;
 
         IF OBJECT_ID('tempdb..#ScriptOutput') IS NOT NULL
             DROP TABLE #ScriptOutput;
@@ -570,7 +652,11 @@ GO
   EJEMPLOS DE USO
 =============================================================================
 
--- 1. Script completo (logins SQL + Windows, todas las BBDDs), salida en filas:
+-- PASO PREVIO: habilitar Ole Automation Procedures si se va a guardar archivo
+--   sp_configure 'Ole Automation Procedures', 1;
+--   RECONFIGURE;
+
+-- 1. Script completo – solo salida por filas (todas las BBDDs, SQL + Windows):
 EXEC dbo.sp_GenerarScriptUsuarios;
 
 -- 2. Solo logins SQL Server (sin Windows):
@@ -585,16 +671,23 @@ EXEC dbo.sp_GenerarScriptUsuarios
 EXEC dbo.sp_GenerarScriptUsuarios
     @SoloBaseDatos = N'MiBaseDeDatos';
 
--- 5. Script completo como texto único (copiar/pegar directo desde SSMS):
---    Antes de ejecutar activar Results to Text: Ctrl+T
+-- 5. Guardar en archivo .sql en el servidor (ruta accesible por SQL Server):
 EXEC dbo.sp_GenerarScriptUsuarios
-    @FormatoSalida = 'TEXTO';
+    @RutaArchivo = N'C:\Sync\script_usuarios.sql';
 
--- 6. Solo una BD, solo SQL logins, salida texto:
+-- 6. Solo una BD, solo logins SQL, y guardar en archivo:
 EXEC dbo.sp_GenerarScriptUsuarios
     @IncluirWindowsLogins = 0,
     @SoloBaseDatos        = N'MiBaseDeDatos',
-    @FormatoSalida        = 'TEXTO';
+    @RutaArchivo          = N'C:\Sync\MiBaseDeDatos_usuarios.sql';
+
+-- 7. Contingencia completa – guardar en archivo de red:
+EXEC dbo.sp_GenerarScriptUsuarios
+    @RutaArchivo = N'\\ServidorContingencia\Compartido\sync_usuarios.sql';
+
+-- NOTA: la salida por filas siempre está activa.
+--   En SSMS use Ctrl+T (Results to Text) antes de ejecutar para copiar/pegar
+--   el bloque completo sin truncado.
 
 =============================================================================
 */
