@@ -330,7 +330,8 @@ BEGIN
                 WHEN dp.type = ''S'' AND sp.name IS NULL
                      AND EXISTS (
                          SELECT 1 FROM master.sys.server_principals sp2
-                         WHERE sp2.name = dp.name AND sp2.type = ''S''
+                         WHERE sp2.name COLLATE DATABASE_DEFAULT = dp.name COLLATE DATABASE_DEFAULT
+                           AND sp2.type COLLATE DATABASE_DEFAULT = ''S''
                      ) THEN
                     N''    -- AVISO: SID mismatch. Se crea el usuario y se reconecta al login del mismo nombre.''
                     + CHAR(13)+CHAR(10)
@@ -386,7 +387,8 @@ BEGIN
                 WHEN dp.type = ''S'' AND sp.name IS NULL
                      AND EXISTS (
                          SELECT 1 FROM master.sys.server_principals sp2
-                         WHERE sp2.name = dp.name AND sp2.type = ''S''
+                         WHERE sp2.name COLLATE DATABASE_DEFAULT = dp.name COLLATE DATABASE_DEFAULT
+                           AND sp2.type COLLATE DATABASE_DEFAULT = ''S''
                      ) THEN
                     N''ALTER USER '' + QUOTENAME(dp.name)
                     + N'' WITH LOGIN = '' + QUOTENAME(dp.name) + N'';'' + CHAR(13)+CHAR(10)
@@ -398,8 +400,8 @@ BEGIN
         LEFT JOIN master.sys.server_principals sp ON dp.sid = sp.sid
         WHERE dp.type IN (''S'', ''U'', ''G'')
           AND dp.principal_id > 4
-          AND dp.name NOT IN (''guest'', ''INFORMATION_SCHEMA'', ''sys'')
-          AND dp.name NOT LIKE ''##%'';
+          AND dp.name COLLATE DATABASE_DEFAULT NOT IN (''guest'', ''INFORMATION_SCHEMA'', ''sys'')
+          AND dp.name COLLATE DATABASE_DEFAULT NOT LIKE ''##%'';
 
         /* ================================================================
          * B. MEMBRESÍA EN ROLES DE BASE DE DATOS
@@ -417,8 +419,8 @@ BEGIN
         INNER JOIN sys.database_principals r ON drm.role_principal_id  = r.principal_id
         INNER JOIN sys.database_principals u ON drm.member_principal_id = u.principal_id
         WHERE u.principal_id > 4
-          AND u.name NOT IN (''guest'', ''INFORMATION_SCHEMA'', ''sys'')
-          AND u.name NOT LIKE ''##%'';
+          AND u.name COLLATE DATABASE_DEFAULT NOT IN (''guest'', ''INFORMATION_SCHEMA'', ''sys'')
+          AND u.name COLLATE DATABASE_DEFAULT NOT LIKE ''##%'';
 
         /* ================================================================
          * C. PERMISOS A NIVEL DE BASE DE DATOS (clase 0)
@@ -438,8 +440,8 @@ BEGIN
         WHERE dp.class = 0
           AND dp.state IN (''G'', ''D'', ''W'')
           AND usr.principal_id > 4
-          AND usr.name NOT IN (''guest'', ''INFORMATION_SCHEMA'', ''sys'')
-          AND usr.name NOT LIKE ''##%''
+          AND usr.name COLLATE DATABASE_DEFAULT NOT IN (''guest'', ''INFORMATION_SCHEMA'', ''sys'')
+          AND usr.name COLLATE DATABASE_DEFAULT NOT LIKE ''##%''
           AND dp.type <> ''CO'';
 
         /* ================================================================
@@ -460,8 +462,8 @@ BEGIN
         WHERE dp.class = 3
           AND dp.state IN (''G'', ''D'', ''W'')
           AND usr.principal_id > 4
-          AND usr.name NOT IN (''guest'', ''INFORMATION_SCHEMA'', ''sys'')
-          AND usr.name NOT LIKE ''##%'';
+          AND usr.name COLLATE DATABASE_DEFAULT NOT IN (''guest'', ''INFORMATION_SCHEMA'', ''sys'')
+          AND usr.name COLLATE DATABASE_DEFAULT NOT LIKE ''##%'';
 
         /* ================================================================
          * E. PERMISOS SOBRE OBJETOS Y COLUMNAS (clase 1)
@@ -498,8 +500,8 @@ BEGIN
         WHERE dp.class = 1
           AND dp.state IN (''G'', ''D'', ''W'')
           AND usr.principal_id > 4
-          AND usr.name NOT IN (''guest'', ''INFORMATION_SCHEMA'', ''sys'')
-          AND usr.name NOT LIKE ''##%'';
+          AND usr.name COLLATE DATABASE_DEFAULT NOT IN (''guest'', ''INFORMATION_SCHEMA'', ''sys'')
+          AND usr.name COLLATE DATABASE_DEFAULT NOT LIKE ''##%'';
         ';
 
         EXEC sp_executesql @SQLDynamic;
