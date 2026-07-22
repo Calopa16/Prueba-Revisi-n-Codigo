@@ -316,7 +316,7 @@ BEGIN
 
             /* ---- rama CREATE (usuario no existe en destino) ---- */
             + N''IF NOT EXISTS (SELECT 1 FROM sys.database_principals WHERE name = ''
-                + QUOTENAME(dp.name, '''''') + N'')''
+                + QUOTENAME(dp.name, '''''''') + N'')''
             + CHAR(13)+CHAR(10)
             + N''BEGIN'' + CHAR(13)+CHAR(10)
             + CASE
@@ -408,7 +408,7 @@ BEGIN
          * ================================================================ */
         INSERT INTO #ScriptOutput (Line)
         SELECT
-            N''IF IS_ROLEMEMBER('' + QUOTENAME(r.name, '''''') + N'', '' + QUOTENAME(u.name, '''''') + N'') = 0''
+            N''IF IS_ROLEMEMBER('' + QUOTENAME(r.name, '''''''') + N'', '' + QUOTENAME(u.name, '''''''') + N'') = 0''
             + CHAR(13)+CHAR(10)
             + N''    ALTER ROLE '' + QUOTENAME(r.name) + N'' ADD MEMBER '' + QUOTENAME(u.name) + N'';''
             + CHAR(13)+CHAR(10)
