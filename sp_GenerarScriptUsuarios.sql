@@ -78,6 +78,15 @@ BEGIN
         (N'  Fecha Generación: ' + CONVERT(VARCHAR(20), GETDATE(), 120)),
         (N'  Compatibilidad  : SQL Server 2012 – 2022'),
         (N'  Idempotente     : Sí – apto para servidor de contingencia'),
+        (N''),
+        (N'  ERRORES ESPERADOS EN DESTINO'),
+        (N'  ----------------------------'),
+        (N'  Msg 3906 (read-only): La BD de destino está en modo read-only'),
+        (N'           (p. ej. réplica AlwaysOn o DATABASE SET READ_ONLY).'),
+        (N'           Comente o elimine la sección de esa BD en el script.'),
+        (N'  Msg 911  (no existe): La BD no existe en el servidor de destino.'),
+        (N'           Créela primero o elimine su sección del script.'),
+        (N'  RAISERROR sev 10: Avisos informativos (huérfanos, etc.). No fatales.'),
         (N'==================================================================*/'),
         (N''),
         (N'USE [master];'),
@@ -272,6 +281,8 @@ BEGIN
             (N'/* ------------------------------------------------------------------ */'),
             (N'/* BASE DE DATOS: ' + @DBName + N'                                    */'),
             (N'/* ------------------------------------------------------------------ */'),
+            (N'-- NOTA: Si esta BD no existe (Msg 911) o es read-only (Msg 3906) en   '),
+            (N'-- el servidor de destino, omita o comente esta sección completa.       '),
             (N'USE ' + QUOTENAME(@DBName) + N';'),
             (N'GO'),
             (N'');
@@ -333,15 +344,15 @@ BEGIN
                     + N'' FOR LOGIN '' + QUOTENAME(dp.name)
                     + ISNULL(N'' WITH DEFAULT_SCHEMA = '' + QUOTENAME(dp.default_schema_name), N'''')
                     + N'';''
-                /* Escenario 3: huérfano sin login relacionado */
+                /* Escenario 3: huérfano sin login relacionado.
+                 * BEGIN/END no puede contener sólo comentarios (parser error);
+                 * se usa RAISERROR informativo (sev 10) como sentencia real. */
                 WHEN dp.type = ''S'' AND sp.name IS NULL THEN
-                    N''    -- ADVERTENCIA: usuario huérfano sin login correspondiente.''
+                    N''    RAISERROR(N''''AVISO: usuario huerfano sin login. Crear manualmente si aplica.'''', 10, 1) WITH NOWAIT;''
                     + CHAR(13)+CHAR(10)
-                    + N''    -- Opciones: (a) CREATE USER '' + QUOTENAME(dp.name)
-                    + N'' WITHOUT LOGIN;''
+                    + N''    -- (a) CREATE USER '' + QUOTENAME(dp.name) + N'' WITHOUT LOGIN;''
                     + CHAR(13)+CHAR(10)
-                    + N''    --           (b) CREATE USER '' + QUOTENAME(dp.name)
-                    + N'' FOR LOGIN [<nombre_login_destino>];''
+                    + N''    -- (b) CREATE USER '' + QUOTENAME(dp.name) + N'' FOR LOGIN [<login_destino>];''
                 /* Windows usuario o grupo */
                 WHEN dp.type IN (''U'', ''G'') THEN
                     N''    CREATE USER '' + QUOTENAME(dp.name)
@@ -349,7 +360,8 @@ BEGIN
                     + ISNULL(N'' WITH DEFAULT_SCHEMA = '' + QUOTENAME(dp.default_schema_name), N'''')
                     + N'';''
                 ELSE
-                    N''    -- Tipo de usuario no contemplado: '' + dp.type_desc
+                    N''    RAISERROR(N''''AVISO: tipo de usuario no contemplado.'''', 10, 1) WITH NOWAIT;''
+                    + N''    -- type_desc: '' + dp.type_desc
               END
             + CHAR(13)+CHAR(10)
             + N''END'' + CHAR(13)+CHAR(10)
@@ -363,7 +375,8 @@ BEGIN
                     N''    ALTER USER '' + QUOTENAME(dp.name)
                     + N'' WITH DEFAULT_SCHEMA = '' + QUOTENAME(dp.default_schema_name) + N'';''
                 ELSE
-                    N''    -- (esquema por defecto NULL – sin cambios)''
+                    /* BEGIN/END con sólo comentario es inválido; se usa sentencia real */
+                    N''    RAISERROR(N''''INFO: El usuario ya existe; esquema por defecto NULL, sin cambios.'''', 10, 1) WITH NOWAIT;''
               END
             + CHAR(13)+CHAR(10)
             + N''END;'' + CHAR(13)+CHAR(10)
