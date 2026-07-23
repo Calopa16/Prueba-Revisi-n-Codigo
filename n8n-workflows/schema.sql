@@ -1,0 +1,23 @@
+CREATE TABLE IF NOT EXISTS documentos_contables (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  fecha_documento DATE,
+  tipo_documento VARCHAR(100),
+  numero_documento VARCHAR(100),
+  proveedor VARCHAR(255),
+  nit VARCHAR(50),
+  subtotal DECIMAL(18,2),
+  iva DECIMAL(18,2),
+  retenciones DECIMAL(18,2),
+  total DECIMAL(18,2),
+  metodo_pago VARCHAR(100),
+  banco VARCHAR(100),
+  numero_comprobante VARCHAR(100),
+  concepto TEXT,
+  observaciones TEXT,
+  nombre_archivo VARCHAR(255),
+  ruta_archivo VARCHAR(500),
+  usuario_telegram VARCHAR(100),
+  fecha_registro DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_duplicado (numero_documento, proveedor, total),
+  INDEX idx_fecha (fecha_documento)
+);
