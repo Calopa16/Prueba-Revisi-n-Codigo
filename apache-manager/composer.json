@@ -1,0 +1,14 @@
+{
+    "name": "apache-manager/php-apache-manager",
+    "description": "PHP web panel to monitor and restart Apache on remote servers via SSH",
+    "type": "project",
+    "require": {
+        "php": ">=8.0",
+        "phpseclib/phpseclib": "^3.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "ApacheManager\\": "src/"
+        }
+    }
+}
