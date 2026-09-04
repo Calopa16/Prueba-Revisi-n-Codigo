@@ -1,0 +1,7 @@
+{
+  "name": "sp_GenerarScriptUsuarios (SQL Server 2022)",
+  "user": "ubuntu",
+  "install": "bash .cursor/scripts/install.sh",
+  "start": "bash .cursor/scripts/start.sh",
+  "ports": [1433]
+}
