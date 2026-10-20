@@ -140,6 +140,11 @@ $alt = ($nombresOrigen | ForEach-Object { [regex]::Escape($_) }) -join '|'
 $mismoNombre = ([string]$infoSrc.n -eq $nombreDestino)
 if ($mismoNombre) { Write-Atencion "Ambos servidores tienen @@SERVERNAME = $nombreDestino; no se cambia la conexion de los planes." }
 
+$qPerfiles = "SELECT COUNT(*) AS c FROM msdb.dbo.sysmail_profile"
+if (@(Invoke-Sql $src $qPerfiles)[0].c -gt 0 -and @(Invoke-Sql $dst $qPerfiles)[0].c -eq 0) {
+    Write-Atencion "Database Mail no tiene perfiles en $Destino; los jobs no enviaran correos hasta configurarlo."
+}
+
 $rxConexion = "(?i)(?<=(?:SqlServerName|Data Source|Server)=)(?:$alt)(?=[;`"&<])"
 $rxPaso     = "(?i)(?<=/SERVER\s+`"?)(?:$alt)(?=[`"\s]|$)"
 $rxResto    = "(?i)(?<![\w-])(?:$alt)(?![\w-])"
@@ -201,10 +206,15 @@ foreach ($pl in $aMigrar) {
         $nuevo = $bytes
     }
     if (-not $mismoNombre) {
+        # Metadatos sin efecto en la ejecucion (equipo creador, descripcion, nombres de objetos).
         $sinNombre = [regex]::Replace($texto, '(?i)' + [regex]::Escape($nombre), '')
+        $sinNombre = [regex]::Replace($sinNombre, '(?i)\b(?:DTS:)?(?:CreatorComputerName|CreatorName|Description|ObjectName)="[^"]*"', '')
+        $vistos = @{}
         foreach ($m in [regex]::Matches($sinNombre, $rxResto)) {
             $ini = [Math]::Max(0, $m.Index - 40)
             $ctx = $sinNombre.Substring($ini, [Math]::Min(100, $sinNombre.Length - $ini)) -replace '\s+', ' '
+            if ($vistos.ContainsKey($ctx)) { continue }
+            $vistos[$ctx] = 1
             Write-Atencion "[$nombre] el plan aun menciona '$($m.Value)': ...$ctx..."
         }
     }
@@ -270,8 +280,11 @@ WHERE js.job_id = @id;
         continue
     }
     if (($existe.Count -gt 0 -or $jobsExistentes.Count -gt 0) -and -not $Reemplazar) {
-        $q = @(); if ($existe.Count -gt 0) { $q += 'el plan' }; if ($jobsExistentes.Count -gt 0) { $q += "jobs: $($jobsExistentes -join ', ')" }
-        Write-Atencion "[$nombre] ya existe en $Destino ($($q -join '; ')). Use -Reemplazar para volver a migrarlo."
+        if ($existe.Count -gt 0) {
+            Write-Atencion "[$nombre] el plan ya existe en $Destino. Use -Reemplazar para volver a migrarlo."
+        } else {
+            Write-Atencion "[$nombre] el plan NO existe en $Destino, pero ya hay jobs con el mismo nombre (copiados sin el plan): $($jobsExistentes -join ', '). Use -Reemplazar para recrearlos junto con el plan."
+        }
         $resumen.Add([pscustomobject]@{ Plan = $nombre; Estado = 'OMITIDO (existe)'; Subplanes = $subplanes.Count; Conexion = $nConex })
         continue
     }
@@ -329,8 +342,16 @@ IF NOT EXISTS (SELECT 1 FROM msdb.dbo.syscategories WHERE name = @c AND category
             $op = V $sp.email_operator
             $nivelMail = $sp.notify_level_email
             if ($op -and @(Invoke-Sql $dst "SELECT 1 AS x FROM msdb.dbo.sysoperators WHERE name = @n" @{ n = $op } $tran).Count -eq 0) {
-                Write-Atencion "[$($sp.job_name)] el operador '$op' no existe en $Destino; el job queda sin notificacion por correo."
-                $op = $null; $nivelMail = 0
+                $o = @(Invoke-Sql $src "SELECT enabled, email_address, pager_address, netsend_address FROM msdb.dbo.sysoperators WHERE name = @n" @{ n = $op })
+                if ($o.Count -gt 0) {
+                    Invoke-Sql $dst @"
+EXEC msdb.dbo.sp_add_operator @name = @n, @enabled = @e, @email_address = @m, @pager_address = @p, @netsend_address = @ns;
+"@ @{ n = $op; e = $o[0].enabled; m = (V $o[0].email_address); p = (V $o[0].pager_address); ns = (V $o[0].netsend_address) } $tran | Out-Null
+                    Write-Host "  Operador '$op' creado en $Destino ($(V $o[0].email_address))" -ForegroundColor Green
+                } else {
+                    Write-Atencion "[$($sp.job_name)] el operador '$op' no existe en $Destino; el job queda sin notificacion por correo."
+                    $op = $null; $nivelMail = 0
+                }
             }
             if (-not $op) { $nivelMail = 0 }
             $activo = 0; if ($JobsActivos) { $activo = $sp.enabled }
@@ -361,7 +382,10 @@ EXEC msdb.dbo.sp_add_jobstep @job_id = @job_id, @step_id = @step_id, @step_name 
 "@ @{ job_id = $jobId; step_id = $ps.step_id; step_name = [string]$ps.step_name; subsystem = [string]$ps.subsystem
       command = $cmdPaso; csc = $ps.cmdexec_success_code; db = (V $ps.database_name); dbu = (V $ps.database_user_name)
       ra = $ps.retry_attempts; ri = $ps.retry_interval; of = (V $ps.output_file_name); flags = $ps.flags; proxy = $proxy } $tran | Out-Null
-                Write-Host ("  Paso {0}: {1}" -f $ps.step_id, $cmdPaso) -ForegroundColor DarkGray
+                $lineas = @($cmdPaso -split "`r?`n")
+                $resumenPaso = $lineas[0]
+                if ($lineas.Count -gt 1) { $resumenPaso += " ... ($($lineas.Count) lineas)" }
+                Write-Host ("  Paso {0} [{1}]: {2}" -f $ps.step_id, $ps.subsystem, $resumenPaso) -ForegroundColor DarkGray
             }
             foreach ($ps in $j.Pasos) {
                 Invoke-Sql $dst @"
